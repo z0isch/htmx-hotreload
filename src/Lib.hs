@@ -27,4 +27,4 @@ server mHotreload = pure $ html_ $ do
         iframe_
             [src_ "https://www.youtube.com/embed/dQw4w9WgXcQ?si=vmk7Ow-_dGCXpRLj"]
             ""
-        h1_ "Rick roll"
+        h1_ "Rick roll!"

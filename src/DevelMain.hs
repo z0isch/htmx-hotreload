@@ -5,7 +5,7 @@
 
 module DevelMain (update) where
 
-import Control.Concurrent (MVar, newEmptyMVar, takeMVar, tryPutMVar)
+import Control.Concurrent (Chan, dupChan, newChan, readChan, writeChan)
 import Control.Concurrent.Async (race_)
 import Data.Text (Text)
 import Lib (app)
@@ -21,27 +21,27 @@ import Text.Shakespeare.Text (st)
 update :: IO ()
 update =
     rapid 0 $ \r -> do
-        hotreloadSem <- createRef @Text r "hotreloadSem" $ newEmptyMVar @()
+        reloadChan <- createRef @Text r "reloadChan" $ newChan @()
 
-        start r "hotreload" $ run 8081 $ hotReloadServer hotreloadSem
+        start r "hotreload" $ run 8081 $ hotReloadServer reloadChan
 
         restart r "webserver" $ do
-            _ <- tryPutMVar hotreloadSem ()
+            writeChan reloadChan ()
             run 8080 $ app $ Just $ hotreloadJs "ws://localhost:8081"
 
-hotReloadServer :: MVar () -> Application
-hotReloadServer hotreloadSem = websocketsOr defaultConnectionOptions hotreloader backup
+hotReloadServer :: Chan () -> Application
+hotReloadServer reloadChan = websocketsOr defaultConnectionOptions hotreloader backup
   where
     hotreloader pc = do
         c <- acceptRequest pc
-        _ <- tryPutMVar hotreloadSem ()
+        myChan <- dupChan reloadChan
         let
             handleClose =
                 receive c >>= \case
                     ControlMessage (Close _ _) -> pure ()
                     _ -> handleClose
             hotreload = do
-                takeMVar hotreloadSem
+                _ <- readChan myChan
                 sendTextData @Text c "hotreload"
                 hotreload
         race_ handleClose hotreload
@@ -66,17 +66,11 @@ hotreloadJs uri = do
     timeout = timeout * 2;
   };
 
-  let init = true
   function connectHotReload() {
     const socket = new WebSocket("#{uri}");
 
     socket.onmessage = async (e) => {
-        if(!init){
-            Idiomorph.morph(document.documentElement,await (await fetch(location.href)).text())
-        }
-        else{
-            init = false
-        }
+      Idiomorph.morph(document.documentElement,await (await fetch(location.href)).text())
     };
 
     socket.onopen = () => {
